@@ -64,15 +64,11 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:open_account, account_number}, _from, state) do
-    case Map.get(state.accounts, account_number) do
-      nil ->
-        new_accounts = Map.put(state.accounts, account_number, 0)
+    %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
 
-        {:reply, {:ok, :account_opened}, %{state | accounts: new_accounts}}
+    replicate_command(new_state.id, {:open_account, account_number})
 
-      _exists ->
-        {:reply, {:error, :account_already_exists}, state}
-    end
+    {:reply, reply, new_state}
   end
 
   def handle_call({:close_account, account_number}, _from, state) do
@@ -163,8 +159,10 @@ defmodule Bank.Branch do
   ## ================================================================
   ## Students, you will want to implement your message handlers here.
   ## ================================================================
-  def handle_info({:your_replication_message_bits_here, _payload}, state) do
-    {:noreply, state}
+  def handle_info({:open_account, account_number}, state) do
+    %{state: new_state, reply: _reply} = attempt_to_open_account(state, account_number)
+
+    {:noreply, new_state}
   end
 
   def handle_info(:another_custom_message, state) do
@@ -182,6 +180,50 @@ defmodule Bank.Branch do
   end
 
   ### ::: Internal helpers :::
+
+  def attempt_to_open_account(state, account_number) do
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        new_accounts = Map.put(state.accounts, account_number, 0)
+
+        %{
+          state: %{state | accounts: new_accounts},
+          reply: {:ok, :account_opened}
+        }
+
+      _exists ->
+        %{state: state, reply: {:error, :account_already_exists}}
+    end
+  end
+
+  def replicate_command(from_branch_id, command_to_send) do
+    from_branch_id
+    |> get_peers()
+    |> Enum.each(fn peer ->
+      Bank.Network.send_message(
+        {:branch, from_branch_id},
+        peer,
+        command_to_send
+      )
+    end)
+  end
+
+  def get_peers(from_branch_id) do
+    all_locations = [
+      {:branch, 1},
+      {:branch, 2},
+      {:branch, 3},
+      {:atm, 1},
+      {:atm, 2},
+      {:atm, 3},
+      {:atm, 4},
+      {:atm, 5},
+      {:atm, 6},
+      {:atm, 7}
+    ]
+
+    all_locations -- [{:branch, from_branch_id}]
+  end
 
   def safe_call(id, call) do
     case(Registry.keys(BankRegistry, self())) do
