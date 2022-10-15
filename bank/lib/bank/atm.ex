@@ -108,8 +108,10 @@ defmodule Bank.Atm do
   ## ================================================================
   ## Students, you will want to implement your message handlers here.
   ## ================================================================
-  def handle_info({:your_replication_message_bits_here, _payload}, state) do
-    {:noreply, state}
+  def handle_info({:open_account, account_number}, state) do
+    %{state: new_state, reply: _reply} = attempt_to_open_account(state, account_number)
+
+    {:noreply, new_state}
   end
 
   def handle_info(unexpected_message, state) do
@@ -123,6 +125,22 @@ defmodule Bank.Atm do
   end
 
   ### ::: Internal helpers :::
+
+  def attempt_to_open_account(state, account_number) do
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        new_accounts = Map.put(state.accounts, account_number, 0)
+
+        %{
+          state: %{state | accounts: new_accounts},
+          reply: {:ok, :account_opened}
+        }
+
+      _exists ->
+        %{state: state, reply: {:error, :account_already_exists}}
+    end
+  end
+
   def safe_call(id, call) do
     case(Registry.keys(BankRegistry, self())) do
       [{_pid, _}] ->

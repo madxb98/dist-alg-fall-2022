@@ -17,7 +17,8 @@ defmodule Bank.AtmTest do
 
   describe "given a new disconnected ATM" do
     setup _ctx do
-      pid = start_supervised!({Atm, 1})
+      start_supervised!({Bank.Network, %{}})
+      [{pid, nil}] = Registry.lookup(BankRegistry, {:atm, 1})
 
       [pid: pid]
     end
