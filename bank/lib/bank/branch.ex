@@ -56,6 +56,10 @@ defmodule Bank.Branch do
     safe_call(id, {:withdraw_cash, account_number, amount})
   end
 
+  def receive_remote_command(branch_id, {:open_account, account_number}) do
+    safe_call(branch_id, {:receive_remote_command, {:open_account, account_number}})
+  end
+
   ### ::: GenServer callbacks :::
 
   def init([id]) do
@@ -64,15 +68,8 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:open_account, account_number}, _from, state) do
-    case Map.get(state.accounts, account_number) do
-      nil ->
-        new_accounts = Map.put(state.accounts, account_number, 0)
-
-        {:reply, {:ok, :account_opened}, %{state | accounts: new_accounts}}
-
-      _exists ->
-        {:reply, {:error, :account_already_exists}, state}
-    end
+    %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
+    {:reply, reply, new_state}
   end
 
   def handle_call({:close_account, account_number}, _from, state) do
@@ -143,6 +140,50 @@ defmodule Bank.Branch do
     {:reply, reply, state}
   end
 
+  def handle_call({:receive_remote_command, [:open_account, account_number]}, _from, state) do
+    %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
+    {:reply, reply, new_state}
+  end
+
+  def attempt_to_open_account(state, account_number) do
+    ##%{state: new_state, reply: reply}
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        new_accounts = Map.put(state.accounts, account_number, 0)
+        new_state = %{state | accounts: new_accounts}
+        replicate_command(new_state.id, {:open_account, account_number})
+        %{state: new_state , reply: {:ok, :account_opened}}
+
+      _exists ->
+        %{state: state, reply: {:error, :account_already_exists}}
+    end
+  end
+
+  def replicate_command(from_branch_id, command_to_send) do
+    from_branch_id
+    |> get_peers()
+    |> Enum.each(fn {peer_module, peer_id} ->
+      IO.puts("Here!")
+      Bank.Network.remote_call({:branch, from_branch_id}, peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
+  end
+
+  def get_peers(from_branch_id) do
+    locations = [
+      {:branch, 1},
+      {:branch, 2},
+      {:branch, 3},
+      {:atm, 1},
+      {:atm, 2},
+      {:atm, 3},
+      {:atm, 4},
+      {:atm, 5},
+      {:atm, 6},
+      {:atm, 7}
+    ]
+
+    locations -- [{:branch, from_branch_id}]
+  end
+
   ## ================================================================
   ## Students, you will want to implement your call handlers here.
   ## ================================================================
@@ -163,8 +204,15 @@ defmodule Bank.Branch do
   ## ================================================================
   ## Students, you will want to implement your message handlers here.
   ## ================================================================
-  def handle_info({:your_replication_message_bits_here, _payload}, state) do
-    {:noreply, state}
+  def handle_info({:open_account, account_number}, state) do
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        new_accounts = Map.put(state.accounts, account_number, 0)
+        {:noreply, %{state | accounts: new_accounts}}
+
+      _exists ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(:another_custom_message, state) do

@@ -6,7 +6,8 @@ defmodule Bank.BranchTest do
 
   describe "given a new disconnected Branch" do
     setup _ctx do
-      pid = start_supervised!({Branch, 1})
+      start_supervised!({Bank.Network, %{}})
+      [{pid, nil}] = Registry.lookup(BankRegistry, {:branch, 1})
 
       [pid: pid]
     end
@@ -38,7 +39,8 @@ defmodule Bank.BranchTest do
 
   describe "given a disconnected Branch with one newly opened account" do
     setup _ctx do
-      pid = start_supervised!({Branch, 1})
+      start_supervised!({Bank.Network, %{}})
+      [{pid, nil}] = Registry.lookup(BankRegistry, {:branch, 1})
       {:ok, :account_opened} = Branch.open_account(1, 1000)
       [pid: pid, account_number: 1000]
     end

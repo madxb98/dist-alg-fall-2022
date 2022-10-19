@@ -17,6 +17,7 @@ defmodule Bank.Network do
 
   `Bank.Network.remote_call(Bank.Branch, :check_cash_on_hand, [1])`.
   """
+  @spec remote_call(module :: Bank.Atm | Bank.Branch, function :: atom(), args :: list()) :: any()
   def remote_call(module, function, args) when module in [Bank.Atm, Bank.Branch] do
     to_type =
       case module do
@@ -38,6 +39,11 @@ defmodule Bank.Network do
     end
   end
 
+  @spec send_message(
+          {from_type :: :atm | :branch, from_id :: non_neg_integer()},
+          {to_type :: :atm | :branch, to_id :: non_neg_integer},
+          message :: any()
+        ) :: any()
   def send_message({from_type, from_id}, {to_type, to_id}, message) do
     GenServer.call(__MODULE__, {:send_message, {from_type, from_id}, {to_type, to_id}, message})
   end

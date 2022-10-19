@@ -37,7 +37,7 @@ The simulation begins with the bank having three (3) branches, seven (7) ATMs, n
 
 You can interact with your system by writing additional unit tests. A good place to start would be "test/bank_test.exs". 
 
-As you ar building out your design, you may also use the Interactive Elixir shell ("iex"). You can open iex and have it load your project by running `iex -S mix` from the terminal.
+As you are building out your design, you may also use the Interactive Elixir shell ("iex"). You can open iex and have it load your project by running `iex -S mix` from the terminal.
 
 For example:
 
@@ -62,10 +62,9 @@ iex(6)> Bank.Branch.check_cash_on_hand(1)
 
 
 ## Additional tools
-
-If you are the lack of static type checks makes you uneasy, you can run 
-and optimistic static type check on the code using Dialyzer using the following
-command from the terminal.
+If the lack of static type checks makes you uneasy, you can run an optimistic 
+static type check on the code using the tool "Dialyzer". Run the following
+command from your terminal.
 
 ```
 mix dialyzer
@@ -75,3 +74,43 @@ The first time you run this utility it will take a while (minutes) as it builds
 persistent lookup tables (PLTs) of all the types in libraries we depend on. 
 Subsequent runs should be fast. It will display warnings of any function argument 
 types or return types that it is sure are incorrect.
+
+
+## Midterm assignment
+
+### Step 1 : make the tests pass
+
+Ensure all of the unit tests pass. When you run `mix test` from your "bank" directory
+the test output should look like this: 
+
+```
+$ mix test
+...................
+Finished in 0.3 seconds (0.00s async, 0.3s sync)
+19 tests, 0 failures
+```
+
+### Step 2 : describe your solution
+
+Please describe your strategy and in particular the replication approach you have taken:
+
+**-->YOUR ANSWER HERE<--**
+
+
+### Step 2 : describe your solutions limitations
+
+Please describe the known limitations to your solution. The key here is to describe 
+the aspects of your midterm code that are good enough to pass the unit tests, but 
+are not good enough to meet the *"Project overview"* requirements described above.
+
+**-->YOUR ANSWER HERE<--**
+
+
+## Step 3 : commit and push your solution to your GitHub repo
+
+Once you are satisfied with your solution, commit your changes to your `main` branch
+and push these changes to your github.com repo. Once you have pushed, please verify  
+that you can see your changes in your repo from a web browser.
+
+This needs to be completed by 2pm on Thursday, October 20 (class time).
+
