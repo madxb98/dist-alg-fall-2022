@@ -69,6 +69,7 @@ defmodule Bank.Branch do
 
   def handle_call({:open_account, account_number}, _from, state) do
     %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
+    replicate_command(new_state.id, {:open_account, account_number})
     {:reply, reply, new_state}
   end
 
@@ -151,7 +152,6 @@ defmodule Bank.Branch do
       nil ->
         new_accounts = Map.put(state.accounts, account_number, 0)
         new_state = %{state | accounts: new_accounts}
-        replicate_command(new_state.id, {:open_account, account_number})
         %{state: new_state , reply: {:ok, :account_opened}}
 
       _exists ->
@@ -164,7 +164,7 @@ defmodule Bank.Branch do
     |> get_peers()
     |> Enum.each(fn {peer_module, peer_id} ->
       IO.puts("Here!")
-      Bank.Network.remote_call({:branch, from_branch_id}, peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
+      Bank.Network.remote_call(peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
   end
 
   def get_peers(from_branch_id) do
