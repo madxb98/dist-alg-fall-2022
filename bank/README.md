@@ -95,6 +95,7 @@ Finished in 0.3 seconds (0.00s async, 0.3s sync)
 Please describe your strategy and in particular the replication approach you have taken:
 
 **-->YOUR ANSWER HERE<--**
+My strategy to implement replication involves Branches and Atms communicating with each other through the RPC system. Ideally a Branch or Atm will receive a command such as opening a new account, and after performing that action the Branch or Atm sends a message to all other Branches & Atms to perform the same action locally.
 
 
 ### Step 2 : describe your solutions limitations
@@ -104,7 +105,7 @@ the aspects of your midterm code that are good enough to pass the unit tests, bu
 are not good enough to meet the *"Project overview"* requirements described above.
 
 **-->YOUR ANSWER HERE<--**
-
+The limitations of this implementation is that it does not hold up in any cases where the network could fail. There is no infastructure to check if messages have actually been received or not, no way to detect if a message has been corrupted or drop bits, no way to repeat the sending of messages if they are lost or corrupted, and the current implementation makes the Branch or Atm that originates the command a single point of failure within the system.
 
 ## Step 3 : commit and push your solution to your GitHub repo
 

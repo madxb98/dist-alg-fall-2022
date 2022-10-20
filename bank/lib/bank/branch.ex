@@ -146,49 +146,21 @@ defmodule Bank.Branch do
     {:reply, reply, new_state}
   end
 
-  def attempt_to_open_account(state, account_number) do
-    ##%{state: new_state, reply: reply}
-    case Map.get(state.accounts, account_number) do
-      nil ->
-        new_accounts = Map.put(state.accounts, account_number, 0)
-        new_state = %{state | accounts: new_accounts}
-        %{state: new_state , reply: {:ok, :account_opened}}
-
-      _exists ->
-        %{state: state, reply: {:error, :account_already_exists}}
-    end
-  end
-
-  def replicate_command(from_branch_id, command_to_send) do
-    from_branch_id
-    |> get_peers()
-    |> Enum.each(fn {peer_module, peer_id} ->
-      IO.puts("Here!")
-      Bank.Network.remote_call(peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
-  end
-
-  def get_peers(from_branch_id) do
-    locations = [
-      {:branch, 1},
-      {:branch, 2},
-      {:branch, 3},
-      {:atm, 1},
-      {:atm, 2},
-      {:atm, 3},
-      {:atm, 4},
-      {:atm, 5},
-      {:atm, 6},
-      {:atm, 7}
-    ]
-
-    locations -- [{:branch, from_branch_id}]
-  end
-
   ## ================================================================
   ## Students, you will want to implement your call handlers here.
   ## ================================================================
   def handle_call({:your_replication_call_bits_here, _payload}, _from, state) do
     {:reply, :your_reply_here, state}
+  end
+
+  def handle_call({:open_account, account_number}, state) do
+    %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
+    {:noreply, new_state}
+  end
+
+  def handle_call({:receive_remote_command, _payload}, _from, state) do
+    %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
+    {:noreply, new_state}
   end
 
   def handle_call(unexpected_call, _from, state) do
@@ -230,6 +202,45 @@ defmodule Bank.Branch do
   end
 
   ### ::: Internal helpers :::
+
+  def attempt_to_open_account(state, account_number) do
+    ##%{state: new_state, reply: reply}
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        new_accounts = Map.put(state.accounts, account_number, 0)
+        new_state = %{state | accounts: new_accounts}
+        IO.inspect(state, label: "state")
+        %{state: new_state , reply: {:ok, :account_opened}}
+
+      _exists ->
+        %{state: state, reply: {:error, :account_already_exists}}
+    end
+  end
+
+  def replicate_command(from_branch_id, command_to_send) do
+    from_branch_id
+    |> get_peers()
+    |> Enum.each(fn {peer_module, peer_id} ->
+      IO.puts("Here!")
+      Bank.Network.remote_call(peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
+  end
+
+  def get_peers(from_branch_id) do
+    locations = [
+      {Bank.Branch, 1},
+      {Bank.Branch, 2},
+      {Bank.Branch, 3},
+      {Bank.Atm, 1},
+      {Bank.Atm, 2},
+      {Bank.Atm, 3},
+      {Bank.Atm, 4},
+      {Bank.Atm, 5},
+      {Bank.Atm, 6},
+      {Bank.Atm, 7}
+    ]
+
+    locations -- [{Bank.Branch, from_branch_id}]
+  end
 
   def safe_call(id, call) do
     case(Registry.keys(BankRegistry, self())) do
