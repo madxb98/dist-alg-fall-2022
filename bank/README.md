@@ -95,7 +95,7 @@ Finished in 0.3 seconds (0.00s async, 0.3s sync)
 Please describe your strategy and in particular the replication approach you have taken:
 
 **-->YOUR ANSWER HERE<--**
-My strategy to implement replication involves Branches and Atms communicating with each other through the RPC system. Ideally a Branch or Atm will receive a command such as opening a new account, and after performing that action the Branch or Atm sends a message to all other Branches & Atms to perform the same action locally.
+My strategy to implement replication involves Branches and Atms communicating with each other through the message passing system. Ideally a Branch or Atm will receive a command such as opening a new account, and after performing that action the Branch or Atm sends a message to all other Branches & Atms to perform the same action locally.
 
 
 ### Step 2 : describe your solutions limitations
