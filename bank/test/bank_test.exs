@@ -21,7 +21,6 @@ defmodule BankTest do
   test "problem 1: create accounts, make deposits, and withdrawals, verify balances and cash-on-hand" do
     branches = [1, 2, 3]
     atms = [1, 2, 3, 4, 5, 6, 7]
-    accounts = [10001, 10002, 20001, 200_002, 30001, 30002]
 
     Bank.Branch.open_account(1, 10001)
     Bank.Branch.open_account(1, 10002)
@@ -127,10 +126,8 @@ defmodule BankTest do
     end)
     |> Task.await_many()
 
-    Enum.map(1..3, fn atm -> Bank.Branch.check_balance(atm, 10001) end)
-
     branch_expected = 1..3 |> Enum.map(fn x -> {:ok, 1000} end)
-    atm_expected = 1..3 |> Enum.map(fn x -> {:ok, 1000} end)
+    atm_expected = 1..7 |> Enum.map(fn x -> {:ok, 1000} end)
 
     branch_actual = Enum.map(1..3, fn atm -> Bank.Branch.check_balance(atm, 10001) end)
     atm_actual = Enum.map(1..7, fn atm -> Bank.Atm.check_balance(atm, 10001) end)
@@ -167,7 +164,7 @@ defmodule BankTest do
 
     assert {:ok, 150} == Bank.Branch.check_balance(1, 10001)
     assert {:ok, 150} == Bank.Branch.check_balance(2, 10001)
-    assert {:error, :account_does_not_exist} == Bank.Branch.check_balance(1, 1002)
+    assert {:error, :account_does_not_exist} == Bank.Branch.check_balance(1, 10002)
   end
 
   defp net_split(from, to) do
