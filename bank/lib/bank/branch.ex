@@ -56,9 +56,18 @@ defmodule Bank.Branch do
     safe_call(id, {:withdraw_cash, account_number, amount})
   end
 
-  #def receive_remote_command(branch_id, {:open_account, account_number}) do
-  #  safe_call(branch_id, {:receive_remote_command, {:open_account, account_number}})
-  #end
+  @spec transfer_money(
+          branch_id :: non_neg_integer(),
+          sending_account_number :: non_neg_integer(),
+          receiving_account_number :: non_neg_integer(),
+          amount_to_send :: non_neg_integer()
+        ) ::
+          {:ok, :money_transferred}
+          | {:error, :account_does_not_exist}
+          | {:error, :insufficient_funds}
+  def transfer_money(branch_id, sending_account_number, receiving_account_number, amount_to_send) do
+    safe_call(branch_id, {:transfer_money, sending_account_number, receiving_account_number, amount_to_send})
+  end
 
   ### ::: GenServer callbacks :::
 
@@ -67,15 +76,8 @@ defmodule Bank.Branch do
     {:ok, state}
   end
 
-  #def handle_call({:open_account, account_number}, _from, state) do
-  #  %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
-  #  replicate_command(new_state.id, {:open_account, account_number})
-  #  {:reply, reply, new_state}
-  #end
-
   def handle_call({:open_account, account_number}, _from, state) do
     %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
-
     replicate_command(new_state.id, {:open_account, account_number})
 
     {:reply, reply, new_state}
@@ -114,25 +116,11 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:withdraw_cash, account_number, withdrawal_amount}, _from, state) do
-    # TODO: Dear Student, please ensure that the branch's cash_on_hand is never negative
+    %{state: new_state, reply: reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
 
-    case Map.get(state.accounts, account_number) do
-      nil ->
-        {:reply, {:error, :account_does_not_exist}, state}
+    replicate_command(new_state.id, {:withdraw_cash, account_number, withdrawal_amount})
 
-      current_amount when current_amount < withdrawal_amount ->
-        {:reply, {:error, :insufficient_funds}, state}
-
-      current_amount ->
-        new_accounts = Map.put(state.accounts, account_number, current_amount - withdrawal_amount)
-
-        new_state =
-          state
-          |> Map.put(:accounts, new_accounts)
-          |> Map.put(:cash_on_hand, state.cash_on_hand - withdrawal_amount)
-
-        {:reply, {:ok, :cash_withdrawn}, new_state}
-    end
+    {:reply, reply, new_state}
   end
 
   def handle_call(:check_cash_on_hand, _from, state) do
@@ -140,10 +128,10 @@ defmodule Bank.Branch do
     {:reply, reply, state}
   end
 
-  #def handle_call({:receive_remote_command, [:open_account, account_number]}, _from, state) do
-  #  %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
-  #  {:reply, reply, new_state}
-  #end
+  def handle_call({:transfer_money, branch_id, sending_account_number, receiving_account_number, amount_to_send}, _from, state) do
+
+    {:reply, reply, state}
+  end
 
   ## ================================================================
   ## Students, you will want to implement your call handlers here.
@@ -151,16 +139,6 @@ defmodule Bank.Branch do
   def handle_call({:your_replication_call_bits_here, _payload}, _from, state) do
     {:reply, :your_reply_here, state}
   end
-
-  #def handle_call({:open_account, account_number}, state) do
-  #  %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
-  #  {:noreply, new_state}
-  #end
-
-  #def handle_call({:receive_remote_command, _payload}, _from, state) do
-  #  %{state: new_state, reply: reply} = attempt_to_open_account(state, account_number)
-  #  {:noreply, new_state}
-  #end
 
   def handle_call(unexpected_call, _from, state) do
     Logger.warn(
@@ -187,6 +165,12 @@ defmodule Bank.Branch do
     {:noreply, new_state}
   end
 
+  def handle_info({:withdraw_cash, account_number, withdrawal_amount}, state) do
+    %{state: new_state, reply: _reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :remote)
+
+    {:noreply, new_state}
+  end
+
   def handle_info(:another_custom_message, state) do
     {:noreply, state}
   end
@@ -202,6 +186,38 @@ defmodule Bank.Branch do
   end
 
   ### ::: Internal helpers :::
+
+  def attempt_to_withdraw_cash(state, account_number, withdrawal_amount, local_or_remote) do
+    case Map.get(state.accounts, account_number) do
+      nil ->
+        %{state: state, reply: {:error, :account_does_not_exist}}
+
+      current_amount when current_amount < withdrawal_amount ->
+        %{state: state, reply: {:error, :insufficient_funds}}
+
+      _current_amount when state.cash_on_hand < withdrawal_amount ->
+        %{state: state, reply: {:error, :not_enough_cash_on_hand_at_this_branch}}
+
+      current_amount ->
+        new_accounts = Map.put(state.accounts, account_number, current_amount - withdrawal_amount)
+
+        new_state =
+          state
+          |> Map.put(:accounts, new_accounts)
+          |> adjust_cash_on_hand(withdrawal_amount, local_or_remote)
+
+        %{state: new_state, reply: {:ok, :cash_withdrawn}}
+    end
+  end
+
+  def adjust_cash_on_hand(state, withdrawal_amount, :local) do
+    state
+    |> Map.put(:cash_on_hand, state.cash_on_hand - withdrawal_amount)
+  end
+  def adjust_cash_on_hand(state, _withdrawal_amount, :remote) do
+    state
+  end
+
 
   def attempt_to_make_deposit(state, account_number, amount) do
     case Map.get(state.accounts, account_number) do
@@ -226,21 +242,12 @@ defmodule Bank.Branch do
     case Map.get(state.accounts, account_number) do
       nil ->
         new_accounts = Map.put(state.accounts, account_number, 0)
-        IO.inspect(state, label: "state")
         %{state: %{state | accounts: new_accounts}, reply: {:ok, :account_opened}}
 
       _exists ->
         %{state: state, reply: {:error, :account_already_exists}}
     end
   end
-
-  #def replicate_command(from_branch_id, command_to_send) do
-  #  from_branch_id
-  #  |> get_peers()
-  #  |> Enum.each(fn {peer_module, peer_id} ->
-  #    IO.puts("Here!")
-  #    Bank.Network.remote_call(peer_module, :receive_remote_command, [peer_id, command_to_send]) end)
-  #end
 
   def replicate_command(from_branch_id, command_to_send) do
     from_branch_id
