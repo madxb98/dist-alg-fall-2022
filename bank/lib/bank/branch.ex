@@ -207,13 +207,16 @@ defmodule Bank.Branch do
           nil ->
             %{state: state, reply: {:error, :account_does_not_exist}}
 
-          current_amount ->
-            new_accounts = Map.put(state.accounts, receiving_account_number, current_amount + amount_to_send)
-            new_accounts = Map.put(state.accounts, sending_account_number, current_amount - amount_to_send)
+          receiving_current_amount ->
+            receiving_new_accounts = Map.put(state.accounts, receiving_account_number, receiving_current_amount + amount_to_send)
+
+          sending_current_amount ->
+            sending_new_accounts = Map.put(state.accounts, sending_account_number, sending_current_amount - amount_to_send)
 
           new_state =
             state
-            |> Map.put(:accounts, new_accounts)
+            |> Map.put(:accounts, receiving_new_accounts)
+            |> Map.put(:accounts, sending_new_accounts)
 
           %{state: new_state, reply: {:ok, :money_transferred}}
         end
