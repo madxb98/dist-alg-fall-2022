@@ -223,7 +223,9 @@ defmodule Bank.Branch do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_accounts = combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send)
+        new_accounts = state.accounts
+          |> Map.put(receiving_account_number, receiving_current_balance + amount_to_send)
+          |> Map.put(sending_account_number, sending_current_balance - amount_to_send)
 
         new_state =
           state
@@ -231,18 +233,6 @@ defmodule Bank.Branch do
 
       %{state: new_state, reply: {:ok, :transferred}}
     end
-  end
-
-  def combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send) do
-    new = Map.put(state.accounts, receiving_account_number, receiving_current_balance + amount_to_send)
-    new2 = Map.put(state.accounts, sending_account_number, sending_current_balance - amount_to_send)
-
-    new_state =
-      state
-      |> Map.put(:accounts, new)
-      |> Map.put(:accounts, new2)
-
-    new_state
   end
 
   def attempt_to_withdraw_cash(state, account_number, withdrawal_amount, local_or_remote) do
