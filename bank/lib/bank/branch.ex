@@ -62,8 +62,9 @@ defmodule Bank.Branch do
           receiving_account_number :: non_neg_integer(),
           amount_to_send :: non_neg_integer()
         ) ::
-          {:ok, :money_transferred}
-          | {:error, :account_does_not_exist}
+          {:ok, :transferred}
+          | {:error, :sending_account_does_not_exist}
+          | {:error, :receiving_account_does_not_exist}
           | {:error, :insufficient_funds}
   def transfer_money(branch_id, sending_account_number, receiving_account_number, amount_to_send) do
     safe_call(branch_id, {:transfer_money, sending_account_number, receiving_account_number, amount_to_send})
@@ -84,17 +85,10 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:close_account, account_number}, _from, state) do
-    case Map.get(state.accounts, account_number) do
-      nil ->
-        {:reply, {:error, :account_does_not_exist}, state}
+    %{state: new_state, reply: reply} = attempt_to_close_account(state, account_number)
+    replicate_command(new_state.id, {:close_account, account_number})
 
-      0 = _balance ->
-        new_accounts = Map.delete(state.accounts, account_number)
-        {:reply, {:ok, :account_closed}, %{state | accounts: new_accounts}}
-
-      _ = _balance ->
-        {:reply, {:error, :account_balance_not_zero}, state}
-    end
+    {:reply, reply, new_state}
   end
 
   def handle_call({:check_balance, account_number}, _from, state) do
@@ -108,7 +102,7 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:deposit_cash, account_number, amount}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_make_deposit(state, account_number, amount)
+    %{state: new_state, reply: reply} = attempt_to_make_deposit(state, account_number, amount, :local)
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
 
@@ -162,6 +156,12 @@ defmodule Bank.Branch do
     {:noreply, new_state}
   end
 
+  def handle_info({:close_account, account_number}, state) do
+    %{state: new_state, reply: _reply} = attempt_to_close_account(state, account_number)
+
+    {:noreply, new_state}
+  end
+
   def handle_info({:transfer_money, sending_account_number, receiving_account_number, amount_to_send}, state) do
     %{state: new_state, reply: _reply} = attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send)
 
@@ -169,7 +169,7 @@ defmodule Bank.Branch do
   end
 
   def handle_info({:deposit_cash, account_number, amount}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_make_deposit(state, account_number, amount)
+    %{state: new_state, reply: _reply} = attempt_to_make_deposit(state, account_number, amount, :remote)
 
     {:noreply, new_state}
   end
@@ -195,32 +195,54 @@ defmodule Bank.Branch do
   end
 
   ### ::: Internal helpers :::
-  def attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send) do
-    case Map.get(state.accounts, sending_account_number) do
+  def attempt_to_close_account(state, account_number) do
+    case Map.get(state.accounts, account_number) do
       nil ->
         %{state: state, reply: {:error, :account_does_not_exist}}
 
-        current_amount when current_amount < amount_to_send ->
-          %{state: state, reply: {:error, :insufficient_funds}}
+      0 = _balance ->
+        new_accounts = Map.delete(state.accounts, account_number)
+        %{state: %{state | accounts: new_accounts}, reply: {:ok, :account_closed}}
 
-        case Map.get(state.accounts, receiving_account_number) do
-          nil ->
-            %{state: state, reply: {:error, :account_does_not_exist}}
-
-          receiving_current_amount ->
-            receiving_new_accounts = Map.put(state.accounts, receiving_account_number, receiving_current_amount + amount_to_send)
-
-          sending_current_amount ->
-            sending_new_accounts = Map.put(state.accounts, sending_account_number, sending_current_amount - amount_to_send)
-
-          new_state =
-            state
-            |> Map.put(:accounts, receiving_new_accounts)
-            |> Map.put(:accounts, sending_new_accounts)
-
-          %{state: new_state, reply: {:ok, :money_transferred}}
-        end
+      _ = _balance ->
+        %{state: state, reply: {:error, :account_balance_not_zero}}
     end
+  end
+
+  def attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send) do
+    sending_current_balance = Map.get(state.accounts, sending_account_number)
+    receiving_current_balance = Map.get(state.accounts, receiving_account_number)
+    case {sending_current_balance, receiving_current_balance} do
+      {nil, _} ->
+        %{state: state, reply: {:error, :sending_account_does_not_exist}}
+
+      {_, nil} ->
+        %{state: state, reply: {:error, :receiving_account_does_not_exist}}
+
+      sending_current_balance when sending_current_balance < amount_to_send ->
+        %{state: state, reply: {:error, :insufficient_funds}}
+
+      _both_exist ->
+        new_accounts = combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send)
+
+        new_state =
+          state
+          |> Map.put(:accounts, new_accounts)
+
+      %{state: new_state, reply: {:ok, :transferred}}
+    end
+  end
+
+  def combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send) do
+    new = Map.put(state.accounts, receiving_account_number, receiving_current_balance + amount_to_send)
+    new2 = Map.put(state.accounts, sending_account_number, sending_current_balance - amount_to_send)
+
+    new_state =
+      state
+      |> Map.put(:accounts, new)
+      |> Map.put(:accounts, new2)
+
+    new_state
   end
 
   def attempt_to_withdraw_cash(state, account_number, withdrawal_amount, local_or_remote) do
@@ -231,7 +253,7 @@ defmodule Bank.Branch do
       current_amount when current_amount < withdrawal_amount ->
         %{state: state, reply: {:error, :insufficient_funds}}
 
-      _current_amount when state.cash_on_hand <= withdrawal_amount ->
+      _current_amount when state.cash_on_hand < withdrawal_amount ->
         %{state: state, reply: {:error, :not_enough_cash_on_hand_at_this_branch}}
 
       current_amount ->
@@ -255,7 +277,7 @@ defmodule Bank.Branch do
   end
 
 
-  def attempt_to_make_deposit(state, account_number, amount) do
+  def attempt_to_make_deposit(state, account_number, amount, local_or_remote) do
     case Map.get(state.accounts, account_number) do
       nil ->
         %{state: state, reply: {:error, :account_does_not_exist}}
@@ -266,10 +288,18 @@ defmodule Bank.Branch do
         new_state =
           state
           |> Map.put(:accounts, new_accounts)
-          |> Map.put(:cash_on_hand, state.cash_on_hand + amount)
+          |> increase_cash_on_hand(amount, local_or_remote)
 
         %{state: new_state, reply: {:ok, :cash_deposited}}
     end
+  end
+
+  def increase_cash_on_hand(state, deposit_amount, :local) do
+    state
+    |> Map.put(:cash_on_hand, state.cash_on_hand + deposit_amount)
+  end
+  def increase_cash_on_hand(state, _deposit_amount, :remote) do
+    state
   end
 
 
