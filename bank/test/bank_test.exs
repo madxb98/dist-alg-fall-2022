@@ -150,8 +150,8 @@ defmodule BankTest do
     # Depending on your implementation these next two line may not be true;
     # If you feel your scheme is so awesome/advanced then comment them out
     # and send a note to the instructors
-    assert {:ok, 100} == Bank.Branch.check_balance(1, 10001)
-    assert {:ok, 50} == Bank.Branch.check_balance(2, 10001)
+    # assert {:ok, 100} == Bank.Branch.check_balance(1, 10001)
+    # assert {:ok, 50} == Bank.Branch.check_balance(2, 10001)
 
     assert {:ok, 150} == Bank.Atm.check_balance(5, 10001)
     assert {:ok, 150} == Bank.Branch.check_balance(3, 10001)

@@ -67,9 +67,9 @@ defmodule Bank.Atm do
     {:reply, reply, state}
   end
 
-
   def handle_call({:deposit_cash, account_number, amount}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_make_deposit(state, account_number, amount, :local)
+    %{state: new_state, reply: reply} =
+      attempt_to_make_deposit(state, account_number, amount, :local)
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
 
@@ -77,7 +77,8 @@ defmodule Bank.Atm do
   end
 
   def handle_call({:withdraw_cash, account_number, withdrawal_amount}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
+    %{state: new_state, reply: reply} =
+      attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
 
     replicate_command(new_state.id, {:withdraw_cash, account_number, withdrawal_amount})
 
@@ -89,10 +90,23 @@ defmodule Bank.Atm do
     {:reply, reply, state}
   end
 
-  def handle_call({:transfer_money, sending_account_number, receiving_account_number, amount_to_send}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send)
+  def handle_call(
+        {:transfer_money, sending_account_number, receiving_account_number, amount_to_send},
+        _from,
+        state
+      ) do
+    %{state: new_state, reply: reply} =
+      attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      )
 
-    replicate_command(new_state.id, {:transfer_money, sending_account_number, receiving_account_number, amount_to_send})
+    replicate_command(
+      new_state.id,
+      {:transfer_money, sending_account_number, receiving_account_number, amount_to_send}
+    )
 
     {:reply, reply, new_state}
   end
@@ -121,8 +135,17 @@ defmodule Bank.Atm do
     {:noreply, state}
   end
 
-  def handle_info({:transfer_money, sending_account_number, receiving_account_number, amount_to_send}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send)
+  def handle_info(
+        {:transfer_money, sending_account_number, receiving_account_number, amount_to_send},
+        state
+      ) do
+    %{state: new_state, reply: _reply} =
+      attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      )
 
     {:noreply, new_state}
   end
@@ -140,13 +163,15 @@ defmodule Bank.Atm do
   end
 
   def handle_info({:deposit_cash, account_number, amount}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_make_deposit(state, account_number, amount, :remote)
+    %{state: new_state, reply: _reply} =
+      attempt_to_make_deposit(state, account_number, amount, :remote)
 
     {:noreply, new_state}
   end
 
   def handle_info({:withdraw_cash, account_number, withdrawal_amount}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :remote)
+    %{state: new_state, reply: _reply} =
+      attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :remote)
 
     {:noreply, new_state}
   end
@@ -176,9 +201,15 @@ defmodule Bank.Atm do
     end
   end
 
-  def attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send) do
+  def attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      ) do
     sending_current_balance = Map.get(state.accounts, sending_account_number)
     receiving_current_balance = Map.get(state.accounts, receiving_account_number)
+
     case {sending_current_balance, receiving_current_balance} do
       {nil, _} ->
         %{state: state, reply: {:error, :sending_account_does_not_exist}}
@@ -190,19 +221,41 @@ defmodule Bank.Atm do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_accounts = combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send)
+        new_accounts =
+          combine_account_changes(
+            state,
+            receiving_current_balance,
+            sending_current_balance,
+            sending_account_number,
+            receiving_account_number,
+            amount_to_send
+          )
 
         new_state =
           state
           |> Map.put(:accounts, new_accounts)
 
-      %{state: new_state, reply: {:ok, :transferred}}
+        %{state: new_state, reply: {:ok, :transferred}}
     end
   end
 
-  def combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send) do
-    new = Map.put(state.accounts, receiving_account_number, receiving_current_balance + amount_to_send)
-    new2 = Map.put(state.accounts, sending_account_number, sending_current_balance - amount_to_send)
+  def combine_account_changes(
+        state,
+        receiving_current_balance,
+        sending_current_balance,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      ) do
+    new =
+      Map.put(
+        state.accounts,
+        receiving_account_number,
+        receiving_current_balance + amount_to_send
+      )
+
+    new2 =
+      Map.put(state.accounts, sending_account_number, sending_current_balance - amount_to_send)
 
     new_state =
       state
@@ -239,6 +292,7 @@ defmodule Bank.Atm do
     state
     |> Map.put(:cash_on_hand, state.cash_on_hand - withdrawal_amount)
   end
+
   def adjust_cash_on_hand(state, _withdrawal_amount, :remote) do
     state
   end
@@ -247,7 +301,7 @@ defmodule Bank.Atm do
     case Map.get(state.accounts, account_number) do
       nil ->
         new_accounts = Map.put(state.accounts, account_number, 0)
-        %{state: %{state | accounts: new_accounts} , reply: {:ok, :account_opened}}
+        %{state: %{state | accounts: new_accounts}, reply: {:ok, :account_opened}}
 
       _exists ->
         %{state: state, reply: {:error, :account_already_exists}}
@@ -275,6 +329,7 @@ defmodule Bank.Atm do
     state
     |> Map.put(:cash_on_hand, state.cash_on_hand + deposit_amount)
   end
+
   def increase_cash_on_hand(state, _deposit_amount, :remote) do
     state
   end

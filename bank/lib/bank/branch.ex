@@ -67,13 +67,16 @@ defmodule Bank.Branch do
           | {:error, :receiving_account_does_not_exist}
           | {:error, :insufficient_funds}
   def transfer_money(branch_id, sending_account_number, receiving_account_number, amount_to_send) do
-    safe_call(branch_id, {:transfer_money, sending_account_number, receiving_account_number, amount_to_send})
+    safe_call(
+      branch_id,
+      {:transfer_money, sending_account_number, receiving_account_number, amount_to_send}
+    )
   end
 
   ### ::: GenServer callbacks :::
 
   def init([id]) do
-    state = %{id: id, cash_on_hand: 1_000, accounts: %{}}
+    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, events: []}
     {:ok, state}
   end
 
@@ -102,7 +105,8 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:deposit_cash, account_number, amount}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_make_deposit(state, account_number, amount, :local)
+    %{state: new_state, reply: reply} =
+      attempt_to_make_deposit(state, account_number, amount, :local)
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
 
@@ -110,7 +114,8 @@ defmodule Bank.Branch do
   end
 
   def handle_call({:withdraw_cash, account_number, withdrawal_amount}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
+    %{state: new_state, reply: reply} =
+      attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
 
     replicate_command(new_state.id, {:withdraw_cash, account_number, withdrawal_amount})
 
@@ -122,10 +127,23 @@ defmodule Bank.Branch do
     {:reply, reply, state}
   end
 
-  def handle_call({:transfer_money, sending_account_number, receiving_account_number, amount_to_send}, _from, state) do
-    %{state: new_state, reply: reply} = attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send)
+  def handle_call(
+        {:transfer_money, sending_account_number, receiving_account_number, amount_to_send},
+        _from,
+        state
+      ) do
+    %{state: new_state, reply: reply} =
+      attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      )
 
-    replicate_command(new_state.id, {:transfer_money, sending_account_number, receiving_account_number, amount_to_send})
+    replicate_command(
+      new_state.id,
+      {:transfer_money, sending_account_number, receiving_account_number, amount_to_send}
+    )
 
     {:reply, reply, new_state}
   end
@@ -162,25 +180,46 @@ defmodule Bank.Branch do
     {:noreply, new_state}
   end
 
-  def handle_info({:transfer_money, sending_account_number, receiving_account_number, amount_to_send}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send)
+  def handle_info(
+        {:transfer_money, sending_account_number, receiving_account_number, amount_to_send},
+        state
+      ) do
+    %{state: new_state, reply: _reply} =
+      attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      )
 
     {:noreply, new_state}
   end
 
   def handle_info({:deposit_cash, account_number, amount}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_make_deposit(state, account_number, amount, :remote)
+    %{state: new_state, reply: _reply} =
+      attempt_to_make_deposit(state, account_number, amount, :remote)
 
     {:noreply, new_state}
   end
 
   def handle_info({:withdraw_cash, account_number, withdrawal_amount}, state) do
-    %{state: new_state, reply: _reply} = attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :remote)
+    %{state: new_state, reply: _reply} =
+      attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :remote)
 
     {:noreply, new_state}
   end
 
   def handle_info(:another_custom_message, state) do
+    {:noreply, state}
+  end
+
+  def handle_info({:relay_message, {_from_type, _from_id}, {to_type, to_id}, message}, state) do
+    Bank.Network.send_message(
+      {:branch, state.id},
+      {to_type, to_id},
+      message
+    )
+
     {:noreply, state}
   end
 
@@ -209,9 +248,15 @@ defmodule Bank.Branch do
     end
   end
 
-  def attempt_to_transfer_money(state, sending_account_number, receiving_account_number, amount_to_send) do
+  def attempt_to_transfer_money(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      ) do
     sending_current_balance = Map.get(state.accounts, sending_account_number)
     receiving_current_balance = Map.get(state.accounts, receiving_account_number)
+
     case {sending_current_balance, receiving_current_balance} do
       {nil, _} ->
         %{state: state, reply: {:error, :sending_account_does_not_exist}}
@@ -223,26 +268,35 @@ defmodule Bank.Branch do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_accounts = combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send)
-
         new_state =
-          state
-          |> Map.put(:accounts, new_accounts)
+          combine_account_changes(
+            state,
+            sending_account_number,
+            receiving_account_number,
+            amount_to_send
+          )
 
-      %{state: new_state, reply: {:ok, :transferred}}
+        %{state: new_state, reply: {:ok, :transferred}}
     end
   end
 
-  def combine_account_changes(state, receiving_current_balance, sending_current_balance, sending_account_number, receiving_account_number, amount_to_send) do
-    new = Map.put(state.accounts, receiving_account_number, receiving_current_balance + amount_to_send)
-    new2 = Map.put(state.accounts, sending_account_number, sending_current_balance - amount_to_send)
+  def combine_account_changes(
+        state,
+        sending_account_number,
+        receiving_account_number,
+        amount_to_send
+      ) do
+    %{state: new_state, reply: _reply} =
+      attempt_to_make_deposit(state, receiving_account_number, amount_to_send, :remote)
 
-    new_state =
-      state
-      |> Map.put(:accounts, new)
-      |> Map.put(:accounts, new2)
+    replicate_command(new_state.id, {:deposit_cash, receiving_account_number, amount_to_send})
 
-    new_state
+    %{state: new_state_2, reply: _reply} =
+      attempt_to_withdraw_cash(state, sending_account_number, amount_to_send, :remote)
+
+    replicate_command(new_state_2.id, {:withdraw_cash, sending_account_number, amount_to_send})
+
+    new_state_2
   end
 
   def attempt_to_withdraw_cash(state, account_number, withdrawal_amount, local_or_remote) do
@@ -272,10 +326,10 @@ defmodule Bank.Branch do
     state
     |> Map.put(:cash_on_hand, state.cash_on_hand - withdrawal_amount)
   end
+
   def adjust_cash_on_hand(state, _withdrawal_amount, :remote) do
     state
   end
-
 
   def attempt_to_make_deposit(state, account_number, amount, local_or_remote) do
     case Map.get(state.accounts, account_number) do
@@ -298,13 +352,13 @@ defmodule Bank.Branch do
     state
     |> Map.put(:cash_on_hand, state.cash_on_hand + deposit_amount)
   end
+
   def increase_cash_on_hand(state, _deposit_amount, :remote) do
     state
   end
 
-
   def attempt_to_open_account(state, account_number) do
-    ##%{state: new_state, reply: reply}
+    ## %{state: new_state, reply: reply}
     case Map.get(state.accounts, account_number) do
       nil ->
         new_accounts = Map.put(state.accounts, account_number, 0)
@@ -316,14 +370,26 @@ defmodule Bank.Branch do
   end
 
   def replicate_command(from_branch_id, command_to_send) do
-    from_branch_id
-    |> get_peers()
-    |> Enum.each(fn peer ->
-      Bank.Network.send_message(
-        {:branch, from_branch_id},
-        peer,
-        command_to_send
-      )
+    first_pass_results =
+      from_branch_id
+      |> get_peers()
+      |> Enum.map(fn peer ->
+        {Bank.Network.send_message(
+           {:branch, from_branch_id},
+           peer,
+           command_to_send
+         ), peer}
+      end)
+
+    good_node =
+      first_pass_results
+      |> Enum.find_value(fn {result, peer} -> if result == {:ok, :sent}, do: peer end)
+
+    first_pass_results
+    |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
+    |> Enum.map(fn {_result, peer} -> peer end)
+    |> Enum.each(fn bad_peer ->
+      Bank.Routing.relay_message({:branch, from_branch_id}, good_node, bad_peer, command_to_send)
     end)
   end
 
