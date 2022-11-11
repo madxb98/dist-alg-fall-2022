@@ -214,11 +214,23 @@ defmodule Bank.Branch do
   end
 
   def handle_info({:relay_message, {_from_type, _from_id}, {to_type, to_id}, message}, state) do
-    Bank.Network.send_message(
-      {:branch, state.id},
-      {to_type, to_id},
-      message
-    )
+    first_pass_results =
+      Bank.Network.send_message(
+        {:branch, state.id},
+        {to_type, to_id},
+        message
+      )
+
+    bad_messages =
+      first_pass_results
+      |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
+      |> Enum.map(fn {_result, peer} -> peer end)
+
+    if bad_messages ->
+      good_nodes =
+        first_pass_results
+        |> Enum.find_value(fn {result, peer} -> if result == {:ok, :sent}, do: peer end)
+
 
     {:noreply, state}
   end
@@ -268,35 +280,15 @@ defmodule Bank.Branch do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_state =
-          combine_account_changes(
-            state,
-            sending_account_number,
-            receiving_account_number,
-            amount_to_send
-          )
+        new_accounts = state.accounts
+          |> Map.put(receiving_account_number, receiving_current_balance + amount_to_send)
+          |> Map.put(sending_account_number, sending_current_balance - amount_to_send)
 
+          new_state =
+            state
+            |> Map.put(:accounts, new_accounts)
         %{state: new_state, reply: {:ok, :transferred}}
     end
-  end
-
-  def combine_account_changes(
-        state,
-        sending_account_number,
-        receiving_account_number,
-        amount_to_send
-      ) do
-    %{state: new_state, reply: _reply} =
-      attempt_to_make_deposit(state, receiving_account_number, amount_to_send, :remote)
-
-    replicate_command(new_state.id, {:deposit_cash, receiving_account_number, amount_to_send})
-
-    %{state: new_state_2, reply: _reply} =
-      attempt_to_withdraw_cash(state, sending_account_number, amount_to_send, :remote)
-
-    replicate_command(new_state_2.id, {:withdraw_cash, sending_account_number, amount_to_send})
-
-    new_state_2
   end
 
   def attempt_to_withdraw_cash(state, account_number, withdrawal_amount, local_or_remote) do
