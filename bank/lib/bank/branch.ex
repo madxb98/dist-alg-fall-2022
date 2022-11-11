@@ -214,23 +214,11 @@ defmodule Bank.Branch do
   end
 
   def handle_info({:relay_message, {_from_type, _from_id}, {to_type, to_id}, message}, state) do
-    first_pass_results =
-      Bank.Network.send_message(
-        {:branch, state.id},
-        {to_type, to_id},
-        message
-      )
-
-    bad_messages =
-      first_pass_results
-      |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
-      |> Enum.map(fn {_result, peer} -> peer end)
-
-    if bad_messages ->
-      good_nodes =
-        first_pass_results
-        |> Enum.find_value(fn {result, peer} -> if result == {:ok, :sent}, do: peer end)
-
+    Bank.Network.send_message(
+      {:branch, state.id},
+      {to_type, to_id},
+      message
+    )
 
     {:noreply, state}
   end
