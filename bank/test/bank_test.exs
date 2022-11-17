@@ -235,13 +235,13 @@ defmodule BankTest do
     1..3
     |> Enum.each(fn x ->
       actual = Bank.Branch.check_balance(x, 10001)
-      assert {:ok, 100} == actual, "check_balance at Atm #{x} returned #{inspect(actual)}"
+      assert {:ok, 100} == actual, "check_balance at Branch #{x} returned #{inspect(actual)}"
     end)
 
     1..7
     |> Enum.each(fn x ->
       actual = Bank.Atm.check_balance(x, 10001)
-      assert {:ok, 100} == actual, "check_balance at Branch #{x} returned #{inspect(actual)}"
+      assert {:ok, 100} == actual, "check_balance at Atm #{x} returned #{inspect(actual)}"
     end)
   end
 

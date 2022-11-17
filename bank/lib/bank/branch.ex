@@ -76,7 +76,12 @@ defmodule Bank.Branch do
   ### ::: GenServer callbacks :::
 
   def init([id]) do
-    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, events: []}
+    connections =
+      get_peers(id)
+      |> Enum.map(fn {type, id} -> {{type, id}, true} end)
+      |> Map.new()
+
+    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, deposits: [], connections: connections}
     {:ok, state}
   end
 
@@ -214,13 +219,46 @@ defmodule Bank.Branch do
   end
 
   def handle_info({:relay_message, {_from_type, _from_id}, {to_type, to_id}, message}, state) do
-    Bank.Network.send_message(
-      {:branch, state.id},
-      {to_type, to_id},
-      message
-    )
+    if Map.get(state.connections, {to_type, to_id}) do
+      Bank.Network.send_message(
+        {:branch, state.id},
+        {to_type, to_id},
+        message
+      )
+    else
+      state.connections
+      |> Enum.find(fn {_, true_or_false} -> true_or_false end)
+      |> case do
+        nil ->
+          nil
+
+        {{relay_type, relay_id}, _} ->
+          Bank.Routing.relay_message(
+            {:branch, state.id},
+            {relay_type, relay_id},
+            {to_type, to_id},
+            message
+          )
+      end
+    end
 
     {:noreply, state}
+  end
+
+  def handle_info({:connection_down, {type, id}}, state) do
+    new_connections =
+      state.connections
+      |> Map.put({type, id}, false)
+
+    {:noreply, %{state | connections: new_connections}}
+  end
+
+  def handle_info({:connection_up, {type, id}}, state) do
+    new_connections =
+      state.connections
+      |> Map.put({type, id}, true)
+
+    {:noreply, %{state | connections: new_connections}}
   end
 
   def handle_info(unexpected_message, state) do
@@ -268,13 +306,15 @@ defmodule Bank.Branch do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_accounts = state.accounts
+        new_accounts =
+          state.accounts
           |> Map.put(receiving_account_number, receiving_current_balance + amount_to_send)
           |> Map.put(sending_account_number, sending_current_balance - amount_to_send)
 
-          new_state =
-            state
-            |> Map.put(:accounts, new_accounts)
+        new_state =
+          state
+          |> Map.put(:accounts, new_accounts)
+
         %{state: new_state, reply: {:ok, :transferred}}
     end
   end
