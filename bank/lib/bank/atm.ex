@@ -45,7 +45,11 @@ defmodule Bank.Atm do
   ### ::: GenServer callbacks :::
 
   def init([id]) do
-    state = %{id: id, cash_on_hand: 1_000, accounts: %{}}
+    connections =
+      get_peers(id)
+      |> Enum.map(fn {type, id} -> {{type, id}, true} end)
+      |> Map.new()
+    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, deposits: [], connections: connections}
     {:ok, state}
   end
 
@@ -70,6 +74,7 @@ defmodule Bank.Atm do
   def handle_call({:deposit_cash, account_number, amount}, _from, state) do
     %{state: new_state, reply: reply} =
       attempt_to_make_deposit(state, account_number, amount, :local)
+
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
 
@@ -176,6 +181,49 @@ defmodule Bank.Atm do
     {:noreply, new_state}
   end
 
+  def handle_info({:relay_message, {_from_type, _from_id}, {to_type, to_id}, message}, state) do
+    if Map.get(state.connections, {to_type, to_id}) do
+      Bank.Network.send_message(
+        {:atm, state.id},
+        {to_type, to_id},
+        message
+      )
+    else
+      state.connections
+      |> Enum.find(fn {_, true_or_false} -> true_or_false end)
+      |> case do
+        nil ->
+          nil
+
+        {{relay_type, relay_id}, _} ->
+          Bank.Routing.relay_message(
+            {:atm, state.id},
+            {relay_type, relay_id},
+            {to_type, to_id},
+            message
+          )
+      end
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info({:connection_down, {type, id}}, state) do
+    new_connections =
+      state.connections
+      |> Map.put({type, id}, false)
+
+    {:noreply, %{state | connections: new_connections}}
+  end
+
+  def handle_info({:connection_up, {type, id}}, state) do
+    new_connections =
+      state.connections
+      |> Map.put({type, id}, true)
+
+    {:noreply, %{state | connections: new_connections}}
+  end
+
   def handle_info(unexpected_message, state) do
     Logger.warn(
       "Dear Student, you have sent a message `#{inspect(unexpected_message)}` to " <>
@@ -221,7 +269,8 @@ defmodule Bank.Atm do
         %{state: state, reply: {:error, :insufficient_funds}}
 
       _both_exist ->
-        new_accounts = state.accounts
+        new_accounts =
+          state.accounts
           |> Map.put(receiving_account_number, receiving_current_balance + amount_to_send)
           |> Map.put(sending_account_number, sending_current_balance - amount_to_send)
 
@@ -302,15 +351,27 @@ defmodule Bank.Atm do
     state
   end
 
-  def replicate_command(from_branch_id, command_to_send) do
-    from_branch_id
-    |> get_peers()
-    |> Enum.each(fn peer ->
-      Bank.Network.send_message(
-        {:branch, from_branch_id},
-        peer,
-        command_to_send
-      )
+  def replicate_command(from_atm_id, command_to_send) do
+    first_pass_results =
+      from_atm_id
+      |> get_peers()
+      |> Enum.map(fn peer ->
+        {Bank.Network.send_message(
+           {:atm, from_atm_id},
+           peer,
+           command_to_send
+         ), peer}
+      end)
+
+    good_node =
+      first_pass_results
+      |> Enum.find_value(fn {result, peer} -> if result == {:ok, :sent}, do: peer end)
+
+    first_pass_results
+    |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
+    |> Enum.map(fn {_result, peer} -> peer end)
+    |> Enum.each(fn bad_peer ->
+      Bank.Routing.relay_message({:atm, from_atm_id}, good_node, bad_peer, command_to_send)
     end)
   end
 
