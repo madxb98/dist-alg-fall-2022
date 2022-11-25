@@ -140,8 +140,8 @@ defmodule BankTest do
     # Depending on your implementation these next two line may not be true;
     # If you feel your scheme is so awesome/advanced then comment them out
     # and send a note to the instructors
-    # assert {:ok, 100} == Bank.Branch.check_balance(1, 10001)
-    # assert {:ok, 50} == Bank.Branch.check_balance(2, 10001)
+    assert {:ok, 100} == Bank.Branch.check_balance(1, 10001)
+    assert {:ok, 50} == Bank.Branch.check_balance(2, 10001)
 
     assert {:ok, 150} == Bank.Atm.check_balance(5, 10001)
     assert {:ok, 150} == Bank.Branch.check_balance(3, 10001)
@@ -193,8 +193,8 @@ defmodule BankTest do
       net_split({:branch, x}, {:branch, 2})
     end)
 
-    assert {:error, :insufficient_funds} == Bank.Branch.withdraw_cash(1, 10001, 43)
-    assert {:ok, :cash_withdrawn} == Bank.Branch.withdraw_cash(1, 10001, 42)
+    assert {:error, :insufficient_funds} == Bank.Branch.withdraw_cash(2, 10001, 43)
+    assert {:ok, :cash_withdrawn} == Bank.Branch.withdraw_cash(2, 10001, 42)
 
     # heal net split of branch #2 with all ATMs
     1..7
@@ -241,7 +241,7 @@ defmodule BankTest do
     1..7
     |> Enum.each(fn x ->
       actual = Bank.Atm.check_balance(x, 10001)
-      assert {:ok, 100} == actual, "check_balance at Atm #{x} returned #{inspect(actual)}"
+      assert {:ok, 100} == actual, "check_balance at ATM #{x} returned #{inspect(actual)}"
     end)
   end
 
