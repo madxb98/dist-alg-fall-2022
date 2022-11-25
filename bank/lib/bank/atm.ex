@@ -74,6 +74,18 @@ defmodule Bank.Atm do
   def handle_call({:deposit_cash, account_number, amount}, _from, state) do
     %{state: new_state, reply: reply} =
       attempt_to_make_deposit(state, account_number, amount, :local)
+      |> case do
+        %{reply: {:ok, :cash_deposited} = reply, state: post_update_state} ->
+          new_deposits = [amount] ++ post_update_state.deposits
+          if length(new_deposits) > 3 do
+            new_deposits
+            |> Enum.drop(-1)
+          end
+          %{reply: reply, state: %{post_update_state | deposits: new_deposits}}
+          |> IO.inspect(label: "state")
+        %{reply: reply} ->
+          {:reply, reply, state: state}
+      end
 
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
@@ -168,9 +180,20 @@ defmodule Bank.Atm do
   end
 
   def handle_info({:deposit_cash, account_number, amount}, state) do
-    %{state: new_state, reply: _reply} =
+    new_state =
       attempt_to_make_deposit(state, account_number, amount, :remote)
-
+      |> case do
+        %{reply: {:ok, :cash_deposited}, state: post_update_state} ->
+          new_deposits = [amount] ++ post_update_state.deposits
+          if length(new_deposits) > 3 do
+            new_deposits
+            |> Enum.drop(-1)
+          end
+          %{post_update_state | deposits: new_deposits}
+          |> IO.inspect(label: "state")
+        %{reply: _reply} ->
+          state
+      end
     {:noreply, new_state}
   end
 
