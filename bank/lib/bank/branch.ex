@@ -81,7 +81,7 @@ defmodule Bank.Branch do
       |> Enum.map(fn {type, id} -> {{type, id}, true} end)
       |> Map.new()
 
-    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, deposits: [], connections: connections}
+    state = %{id: id, cash_on_hand: 1_000, accounts: %{}, deposits: [], connections: connections, unreplicated: []}
     {:ok, state}
   end
 
@@ -114,13 +114,12 @@ defmodule Bank.Branch do
       attempt_to_make_deposit(state, account_number, amount, :local)
       |> case do
         %{reply: {:ok, :cash_deposited} = reply, state: post_update_state} ->
-          new_deposits = [amount] ++ post_update_state.deposits
-          if length(new_deposits) > 3 do
-            new_deposits
-            |> Enum.drop(-1)
-          end
+          new_deposits =
+            ([amount] ++ post_update_state.deposits)
+            |> Enum.take(3)
+
           %{reply: reply, state: %{post_update_state | deposits: new_deposits}}
-          |> IO.inspect(label: "state")
+
         %{reply: reply} ->
           {:reply, reply, state: state}
       end
@@ -134,9 +133,11 @@ defmodule Bank.Branch do
     %{state: new_state, reply: reply} =
       attempt_to_withdraw_cash(state, account_number, withdrawal_amount, :local)
 
-    replicate_command(new_state.id, {:withdraw_cash, account_number, withdrawal_amount})
+    unreplicated = replicate_command(new_state.id, {:withdraw_cash, account_number, withdrawal_amount})
+    new_unreplicated = unreplicated ++ state.unreplicated
+    |> IO.inspect(label: "unreplicated")
 
-    {:reply, reply, new_state}
+    {:reply, reply, %{new_state | unreplicated: new_unreplicated}}
   end
 
   def handle_call(:check_cash_on_hand, _from, state) do
@@ -217,16 +218,16 @@ defmodule Bank.Branch do
       attempt_to_make_deposit(state, account_number, amount, :remote)
       |> case do
         %{reply: {:ok, :cash_deposited}, state: post_update_state} ->
-          new_deposits = [amount] ++ post_update_state.deposits
-          if length(new_deposits) > 3 do
-            new_deposits
-            |> Enum.drop(-1)
-          end
+          new_deposits =
+            ([amount] ++ post_update_state.deposits)
+            |> Enum.take(3)
+
           %{post_update_state | deposits: new_deposits}
-          |> IO.inspect(label: "state")
+
         %{reply: _reply} ->
           state
       end
+
     {:noreply, new_state}
   end
 
@@ -281,7 +282,17 @@ defmodule Bank.Branch do
       state.connections
       |> Map.put({type, id}, true)
 
-    {:noreply, %{state | connections: new_connections}}
+    IO.inspect(state.unreplicated, label: "replicated")
+    if Enum.any?(state.unreplicated) do
+      net_split_replication(state, state.unreplicated)
+    end
+
+    new_state =
+      state
+      |> Map.put(:unreplicated, [])
+      |> Map.put(:connections, new_connections)
+
+    {:noreply, new_state}
   end
 
   def handle_info(unexpected_message, state) do
@@ -347,11 +358,34 @@ defmodule Bank.Branch do
       nil ->
         %{state: state, reply: {:error, :account_does_not_exist}}
 
-      current_amount when current_amount < withdrawal_amount ->
-        %{state: state, reply: {:error, :insufficient_funds}}
-
       _current_amount when state.cash_on_hand < withdrawal_amount ->
         %{state: state, reply: {:error, :not_enough_cash_on_hand_at_this_branch}}
+
+      current_amount when current_amount < withdrawal_amount ->
+        if check_if_completely_split(state) do
+          average = Enum.sum(state.deposits) / 3
+
+          cond do
+            withdrawal_amount > current_amount + average ->
+              %{state: state, reply: {:error, :insufficient_funds}}
+
+            true ->
+              new_accounts =
+                Map.put(state.accounts, account_number, current_amount - withdrawal_amount)
+
+              new_state =
+                state
+                |> Map.put(:accounts, new_accounts)
+                |> adjust_cash_on_hand(withdrawal_amount, local_or_remote)
+
+              %{state: new_state, reply: {:ok, :cash_withdrawn}}
+          end
+        else
+          %{state: state, reply: {:error, :insufficient_funds}}
+        end
+
+      current_amount when withdrawal_amount < current_amount ->
+        %{state: state, reply: {:error, :insufficient_funds}}
 
       current_amount ->
         new_accounts = Map.put(state.accounts, account_number, current_amount - withdrawal_amount)
@@ -375,27 +409,6 @@ defmodule Bank.Branch do
   end
 
   def attempt_to_make_deposit(state, account_number, amount, local_or_remote) do
-    if Enum.all?(state.connections, fn x -> x == false end) do
-      average =
-      Enum.sum(state.connections)
-      |> /3
-      case Map.get(state.accounts, account_number) do
-        nil ->
-          %{state: state, reply: {:error, :account_does_not_exist}}
-
-        current_amount ->
-          if current_amount + amount <= current_amount + average do
-            new_accounts = Map.put(state.accounts, account_number, current_amount + amount)
-          else
-            %{state: state, reply: {:error, :insufficient_funds}}
-          end
-
-          new_state =
-            state
-            |> Map.put(:accounts, new_accounts)
-            |> increase_cash_on_hand(amount, local_or_remote)
-      end
-    end
     case Map.get(state.accounts, account_number) do
       nil ->
         %{state: state, reply: {:error, :account_does_not_exist}}
@@ -433,10 +446,26 @@ defmodule Bank.Branch do
     end
   end
 
+  def check_if_completely_split(state) do
+    Enum.all?(state.connections, fn {_, connected} -> connected == false end)
+  end
+
+  def net_split_replication(state, peers_to_replicate) do
+    peers_to_replicate
+    |> Enum.map(fn {peer, command_to_send} ->
+      IO.inspect(peer, label: "peer")
+      Bank.Network.send_message({:branch, state.id}, peer, command_to_send)
+      |> IO.inspect(label: "messages")
+      _ ->
+        :ok
+    end)
+
+  end
+
   def replicate_command(from_branch_id, command_to_send) do
+    branch_peers = from_branch_id |> get_peers()
     first_pass_results =
-      from_branch_id
-      |> get_peers()
+      branch_peers
       |> Enum.map(fn peer ->
         {Bank.Network.send_message(
            {:branch, from_branch_id},
@@ -449,12 +478,26 @@ defmodule Bank.Branch do
       first_pass_results
       |> Enum.find_value(fn {result, peer} -> if result == {:ok, :sent}, do: peer end)
 
-    first_pass_results
-    |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
-    |> Enum.map(fn {_result, peer} -> peer end)
-    |> Enum.each(fn bad_peer ->
-      Bank.Routing.relay_message({:branch, from_branch_id}, good_node, bad_peer, command_to_send)
-    end)
+    new_unreplicated =
+    if good_node != nil do
+      first_pass_results
+      |> Enum.reject(fn {result, _peer} -> result == {:ok, :sent} end)
+      |> Enum.map(fn {_result, peer} -> peer end)
+      |> Enum.map(fn bad_peer ->
+        relay_result = Bank.Routing.relay_message(
+          {:branch, from_branch_id},
+          good_node,
+          bad_peer,
+          command_to_send
+        )
+      {relay_result, bad_peer}
+      end)
+      |> Enum.reject(fn {relay_result, _} -> relay_result == {:ok, :sent} end)
+      |> Enum.map(fn {_, peer} -> {peer, command_to_send} end)
+    else
+      branch_peers
+      |> Enum.map(fn peer -> {peer, command_to_send} end)
+    end
   end
 
   def get_peers(from_branch_id) do

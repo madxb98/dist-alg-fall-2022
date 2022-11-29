@@ -49,6 +49,7 @@ defmodule Bank.Atm do
       get_peers(id)
       |> Enum.map(fn {type, id} -> {{type, id}, true} end)
       |> Map.new()
+
     state = %{id: id, cash_on_hand: 1_000, accounts: %{}, deposits: [], connections: connections}
     {:ok, state}
   end
@@ -77,16 +78,17 @@ defmodule Bank.Atm do
       |> case do
         %{reply: {:ok, :cash_deposited} = reply, state: post_update_state} ->
           new_deposits = [amount] ++ post_update_state.deposits
+
           if length(new_deposits) > 3 do
             new_deposits
             |> Enum.drop(-1)
           end
+
           %{reply: reply, state: %{post_update_state | deposits: new_deposits}}
-          |> IO.inspect(label: "state")
+
         %{reply: reply} ->
           {:reply, reply, state: state}
       end
-
 
     replicate_command(new_state.id, {:deposit_cash, account_number, amount})
 
@@ -185,15 +187,18 @@ defmodule Bank.Atm do
       |> case do
         %{reply: {:ok, :cash_deposited}, state: post_update_state} ->
           new_deposits = [amount] ++ post_update_state.deposits
+
           if length(new_deposits) > 3 do
             new_deposits
             |> Enum.drop(-1)
           end
+
           %{post_update_state | deposits: new_deposits}
-          |> IO.inspect(label: "state")
+
         %{reply: _reply} ->
           state
       end
+
     {:noreply, new_state}
   end
 
